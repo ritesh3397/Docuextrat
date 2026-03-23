@@ -1,3 +1,6 @@
+import sys, os
+sys.path.insert(0, os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
+
 from fastapi import APIRouter, UploadFile, File, Form, Depends, BackgroundTasks, HTTPException
 from auth import check_limit
 from db import create_job, save_result, save_error, log_usage
