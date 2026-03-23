@@ -1,3 +1,4 @@
+
 import os, sys, uuid, json, re, io
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
@@ -12,27 +13,47 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Config ────────────────────────────────────────────────────────────────────
 GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
 SUPABASE_URL = os.environ.get("SUPABASE_URL")
 SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-# ── App ───────────────────────────────────────────────────────────────────────
-app = FastAPI(title="DocuExtract AI Engine", version="1.0.0")
+app = FastAPI(
+    title="DocuExtract AI Engine",
+    description="""
+## 📄 Extract structured data from any document instantly!
+
+**Supported Documents:**
+- 🧾 Invoices
+- 🧾 Receipts
+- 🪪 ID Cards
+
+**How to use:**
+1. Click **Authorize** button → Enter your API Key
+2. POST `/v1/extract` → Upload document
+3. GET `/v1/results/{job_id}` → Get extracted JSON
+
+**Test API Key:** `test-api-key-123`
+    """,
+    version="1.0.0",
+    openapi_tags=[
+        {"name": "Health", "description": "✅ Check if API is running"},
+        {"name": "Extract", "description": "📤 Upload document for AI extraction"},
+        {"name": "Results", "description": "📥 Get extracted JSON data"},
+    ]
+)
+
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
 API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=True)
 TIER_LIMITS = {"free": 50, "starter": 500, "professional": 2000, "enterprise": 999999}
 ALLOWED = {"image/jpeg", "image/png", "image/webp", "image/tiff", "application/pdf"}
 
-# ── Supabase ──────────────────────────────────────────────────────────────────
 def get_supabase():
     return create_client(
         os.environ.get("SUPABASE_URL"),
         os.environ.get("SUPABASE_KEY")
     )
 
-# ── DB Functions ──────────────────────────────────────────────────────────────
 def get_user_by_api_key(api_key):
     supabase = get_supabase()
     res = supabase.table("users").select("*").eq("api_key", api_key).single().execute()
@@ -86,7 +107,6 @@ def log_usage(user_id, job_id):
         "month": datetime.utcnow().strftime("%Y-%m")
     }).execute()
 
-# ── Auth ──────────────────────────────────────────────────────────────────────
 def get_current_user(api_key: str = Security(API_KEY_HEADER)):
     user = get_user_by_api_key(api_key)
     if not user:
@@ -101,7 +121,6 @@ def check_limit(api_key: str = Security(API_KEY_HEADER)):
         raise HTTPException(status_code=429, detail=f"Monthly limit of {limit} docs reached.")
     return user
 
-# ── OCR ───────────────────────────────────────────────────────────────────────
 def extract_text(file_bytes, content_type):
     if content_type == "application/pdf":
         pages = convert_from_bytes(file_bytes)
@@ -109,7 +128,6 @@ def extract_text(file_bytes, content_type):
     image = Image.open(io.BytesIO(file_bytes))
     return pytesseract.image_to_string(image, config="--oem 3 --psm 6")
 
-# ── Classifier ────────────────────────────────────────────────────────────────
 KEYWORDS = {
     "invoice": ["invoice", "bill to", "due date", "subtotal", "vendor", "gst"],
     "receipt": ["receipt", "thank you", "cashier", "change", "payment received"],
@@ -122,7 +140,6 @@ def classify(raw_text):
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "invoice"
 
-# ── LLM ───────────────────────────────────────────────────────────────────────
 PROMPTS = {
     "invoice": "Extract vendor_name, customer_name, date (YYYY-MM-DD), invoice_number, currency, subtotal, tax_amount, total_amount, line_items (array of {description,quantity,unit_price,total}), confidence_score (0-1). Use null for missing. JSON only.",
     "receipt": "Extract merchant_name, date (YYYY-MM-DD), currency, total_amount, tax_amount, payment_method, line_items (array of {description,quantity,unit_price,total}), confidence_score (0-1). Use null for missing. JSON only.",
@@ -147,7 +164,6 @@ def extract_structured(raw_text, doc_type):
     result["doc_type"] = doc_type
     return result
 
-# ── Background Task ───────────────────────────────────────────────────────────
 def process(job_id, file_bytes, content_type, doc_type, webhook_url):
     try:
         raw_text = extract_text(file_bytes, content_type)
@@ -162,17 +178,16 @@ def process(job_id, file_bytes, content_type, doc_type, webhook_url):
     except Exception as e:
         save_error(job_id, str(e))
 
-# ── Routes ────────────────────────────────────────────────────────────────────
-@app.get("/v1/health")
+@app.get("/v1/health", tags=["Health"])
 def health():
     return {"status": "ok", "timestamp": datetime.utcnow().isoformat()}
 
-@app.post("/v1/extract", status_code=202)
+@app.post("/v1/extract", status_code=202, tags=["Extract"])
 async def extract(
     background_tasks: BackgroundTasks,
-    file: UploadFile = File(...),
-    doc_type: str = Form("auto"),
-    webhook_url: str = Form(None),
+    file: UploadFile = File(..., description="Upload invoice, receipt or ID card (JPG/PNG/PDF)"),
+    doc_type: str = Form("auto", description="auto | invoice | receipt | id_card"),
+    webhook_url: str = Form(None, description="Optional callback URL"),
     user=Depends(check_limit),
 ):
     if file.content_type not in ALLOWED:
@@ -183,7 +198,7 @@ async def extract(
     background_tasks.add_task(process, job["id"], file_bytes, file.content_type, doc_type, webhook_url)
     return {"job_id": job["id"], "status": "processing"}
 
-@app.get("/v1/results/{job_id}")
+@app.get("/v1/results/{job_id}", tags=["Results"])
 def get_results(job_id: str, api_key: str = Security(API_KEY_HEADER)):
     user = get_current_user(api_key)
     job = get_job(job_id)
