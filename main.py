@@ -1,26 +1,23 @@
-import sys, os
-sys.path.insert(0, os.path.dirname(os.path.abspath(__file__)))
-
+import os, sys, uuid, json, re, io
 from fastapi import FastAPI, UploadFile, File, Form, HTTPException, BackgroundTasks, Security, Depends
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.security.api_key import APIKeyHeader
 from supabase import create_client
 from datetime import datetime
-import uuid, json, re, httpx, pytesseract, io, os
 from PIL import Image
 from pdf2image import convert_from_bytes
+import pytesseract
+import httpx
 from dotenv import load_dotenv
 
 load_dotenv()
 
-# ── Config ──────────────────────────────────────────────────────────────────
-GROQ_API_KEY = os.getenv("GROQ_API_KEY")
-SUPABASE_URL = os.getenv("SUPABASE_URL")
-SUPABASE_KEY = os.getenv("SUPABASE_KEY")
+# ── Config ────────────────────────────────────────────────────────────────────
+GROQ_API_KEY = os.environ.get("GROQ_API_KEY")
+SUPABASE_URL = os.environ.get("SUPABASE_URL")
+SUPABASE_KEY = os.environ.get("SUPABASE_KEY")
 
-supabase = create_client(SUPABASE_URL, SUPABASE_KEY)
-
-# ── App ──────────────────────────────────────────────────────────────────────
+# ── App ───────────────────────────────────────────────────────────────────────
 app = FastAPI(title="DocuExtract AI Engine", version="1.0.0")
 app.add_middleware(CORSMiddleware, allow_origins=["*"], allow_methods=["*"], allow_headers=["*"])
 
@@ -28,38 +25,68 @@ API_KEY_HEADER = APIKeyHeader(name="X-API-Key", auto_error=True)
 TIER_LIMITS = {"free": 50, "starter": 500, "professional": 2000, "enterprise": 999999}
 ALLOWED = {"image/jpeg", "image/png", "image/webp", "image/tiff", "application/pdf"}
 
-# ── DB ───────────────────────────────────────────────────────────────────────
+# ── Supabase ──────────────────────────────────────────────────────────────────
+def get_supabase():
+    return create_client(
+        os.environ.get("SUPABASE_URL"),
+        os.environ.get("SUPABASE_KEY")
+    )
+
+# ── DB Functions ──────────────────────────────────────────────────────────────
 def get_user_by_api_key(api_key):
+    supabase = get_supabase()
     res = supabase.table("users").select("*").eq("api_key", api_key).single().execute()
     return res.data
 
 def get_monthly_usage(user_id):
+    supabase = get_supabase()
     month = datetime.utcnow().strftime("%Y-%m")
     res = supabase.table("usage_logs").select("id", count="exact").eq("user_id", user_id).eq("month", month).execute()
     return res.count or 0
 
 def create_job(user_id, doc_type, webhook_url=None):
-    job = {"id": str(uuid.uuid4()), "user_id": user_id, "status": "processing",
-           "doc_type": doc_type, "webhook_url": webhook_url, "created_at": datetime.utcnow().isoformat()}
+    supabase = get_supabase()
+    job = {
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "status": "processing",
+        "doc_type": doc_type,
+        "webhook_url": webhook_url,
+        "created_at": datetime.utcnow().isoformat()
+    }
     supabase.table("jobs").insert(job).execute()
     return job
 
 def save_result(job_id, result):
-    supabase.table("jobs").update({"status": "completed", "result": result,
-        "completed_at": datetime.utcnow().isoformat()}).eq("id", job_id).execute()
+    supabase = get_supabase()
+    supabase.table("jobs").update({
+        "status": "completed",
+        "result": result,
+        "completed_at": datetime.utcnow().isoformat()
+    }).eq("id", job_id).execute()
 
 def save_error(job_id, error):
-    supabase.table("jobs").update({"status": "failed", "error_message": error}).eq("id", job_id).execute()
+    supabase = get_supabase()
+    supabase.table("jobs").update({
+        "status": "failed",
+        "error_message": error
+    }).eq("id", job_id).execute()
 
 def get_job(job_id):
+    supabase = get_supabase()
     res = supabase.table("jobs").select("*").eq("id", job_id).single().execute()
     return res.data
 
 def log_usage(user_id, job_id):
-    supabase.table("usage_logs").insert({"id": str(uuid.uuid4()), "user_id": user_id,
-        "job_id": job_id, "month": datetime.utcnow().strftime("%Y-%m")}).execute()
+    supabase = get_supabase()
+    supabase.table("usage_logs").insert({
+        "id": str(uuid.uuid4()),
+        "user_id": user_id,
+        "job_id": job_id,
+        "month": datetime.utcnow().strftime("%Y-%m")
+    }).execute()
 
-# ── Auth ─────────────────────────────────────────────────────────────────────
+# ── Auth ──────────────────────────────────────────────────────────────────────
 def get_current_user(api_key: str = Security(API_KEY_HEADER)):
     user = get_user_by_api_key(api_key)
     if not user:
@@ -74,7 +101,7 @@ def check_limit(api_key: str = Security(API_KEY_HEADER)):
         raise HTTPException(status_code=429, detail=f"Monthly limit of {limit} docs reached.")
     return user
 
-# ── OCR ──────────────────────────────────────────────────────────────────────
+# ── OCR ───────────────────────────────────────────────────────────────────────
 def extract_text(file_bytes, content_type):
     if content_type == "application/pdf":
         pages = convert_from_bytes(file_bytes)
@@ -82,7 +109,7 @@ def extract_text(file_bytes, content_type):
     image = Image.open(io.BytesIO(file_bytes))
     return pytesseract.image_to_string(image, config="--oem 3 --psm 6")
 
-# ── Classifier ───────────────────────────────────────────────────────────────
+# ── Classifier ────────────────────────────────────────────────────────────────
 KEYWORDS = {
     "invoice": ["invoice", "bill to", "due date", "subtotal", "vendor", "gst"],
     "receipt": ["receipt", "thank you", "cashier", "change", "payment received"],
@@ -95,7 +122,7 @@ def classify(raw_text):
     best = max(scores, key=scores.get)
     return best if scores[best] > 0 else "invoice"
 
-# ── LLM ──────────────────────────────────────────────────────────────────────
+# ── LLM ───────────────────────────────────────────────────────────────────────
 PROMPTS = {
     "invoice": "Extract vendor_name, customer_name, date (YYYY-MM-DD), invoice_number, currency, subtotal, tax_amount, total_amount, line_items (array of {description,quantity,unit_price,total}), confidence_score (0-1). Use null for missing. JSON only.",
     "receipt": "Extract merchant_name, date (YYYY-MM-DD), currency, total_amount, tax_amount, payment_method, line_items (array of {description,quantity,unit_price,total}), confidence_score (0-1). Use null for missing. JSON only.",
@@ -106,8 +133,12 @@ def extract_structured(raw_text, doc_type):
     prompt = PROMPTS.get(doc_type, PROMPTS["invoice"])
     response = httpx.post(
         "https://api.groq.com/openai/v1/chat/completions",
-        headers={"Authorization": f"Bearer {GROQ_API_KEY}"},
-        json={"model": "llama-3.1-8b-instant", "messages": [{"role": "user", "content": f"{prompt}\n\nOCR TEXT:\n{raw_text[:4000]}"}], "temperature": 0.1},
+        headers={"Authorization": f"Bearer {os.environ.get('GROQ_API_KEY')}"},
+        json={
+            "model": "llama-3.1-8b-instant",
+            "messages": [{"role": "user", "content": f"{prompt}\n\nOCR TEXT:\n{raw_text[:4000]}"}],
+            "temperature": 0.1
+        },
         timeout=30,
     )
     response.raise_for_status()
@@ -160,5 +191,10 @@ def get_results(job_id: str, api_key: str = Security(API_KEY_HEADER)):
         raise HTTPException(404, "Job not found.")
     if job["user_id"] != user["id"]:
         raise HTTPException(403, "Access denied.")
-    return {"job_id": job["id"], "status": job["status"], "doc_type": job.get("doc_type"),
-            "result": job.get("result"), "error_message": job.get("error_message")}
+    return {
+        "job_id": job["id"],
+        "status": job["status"],
+        "doc_type": job.get("doc_type"),
+        "result": job.get("result"),
+        "error_message": job.get("error_message")
+    }
