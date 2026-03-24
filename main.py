@@ -213,3 +213,8 @@ def get_results(job_id: str, api_key: str = Security(API_KEY_HEADER)):
         "result": job.get("result"),
         "error_message": job.get("error_message")
     }
+from fastapi.responses import FileResponse
+
+@app.get("/")
+def serve_ui():
+    return FileResponse("index.html")
