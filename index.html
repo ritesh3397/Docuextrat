@@ -1,0 +1,551 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>DocuExtract — AI Document Parser</title>
+<link href="https://fonts.googleapis.com/css2?family=Syne:wght@400;600;700;800&family=DM+Mono:wght@400;500&display=swap" rel="stylesheet">
+<style>
+  *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+  :root {
+    --bg: #0a0e12;
+    --surface: #111820;
+    --border: #1e2a35;
+    --teal: #00d4b8;
+    --teal-dim: rgba(0,212,184,0.12);
+    --teal-glow: rgba(0,212,184,0.25);
+    --text: #e8f0f5;
+    --muted: #5a7080;
+    --success: #00d4b8;
+    --error: #ff4d6d;
+  }
+
+  body {
+    font-family: 'Syne', sans-serif;
+    background: var(--bg);
+    color: var(--text);
+    min-height: 100vh;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    padding: 40px 20px;
+    background-image:
+      radial-gradient(ellipse 60% 40% at 50% -10%, rgba(0,212,184,0.08) 0%, transparent 70%);
+  }
+
+  /* Header */
+  header {
+    text-align: center;
+    margin-bottom: 48px;
+    animation: fadeDown 0.6s ease both;
+  }
+
+  .logo {
+    display: inline-flex;
+    align-items: center;
+    gap: 10px;
+    margin-bottom: 16px;
+  }
+
+  .logo-icon {
+    width: 40px; height: 40px;
+    background: var(--teal);
+    border-radius: 10px;
+    display: grid;
+    place-items: center;
+    font-size: 20px;
+  }
+
+  .logo-text {
+    font-size: 22px;
+    font-weight: 800;
+    letter-spacing: -0.5px;
+    color: var(--text);
+  }
+
+  .logo-text span { color: var(--teal); }
+
+  h1 {
+    font-size: clamp(28px, 5vw, 48px);
+    font-weight: 800;
+    line-height: 1.1;
+    letter-spacing: -1px;
+    margin-bottom: 12px;
+  }
+
+  h1 em {
+    font-style: normal;
+    color: var(--teal);
+  }
+
+  .subtitle {
+    color: var(--muted);
+    font-size: 15px;
+    font-weight: 400;
+  }
+
+  /* Main card */
+  .card {
+    width: 100%;
+    max-width: 620px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    padding: 32px;
+    animation: fadeUp 0.6s ease 0.1s both;
+  }
+
+  /* API Key */
+  .field {
+    margin-bottom: 20px;
+  }
+
+  label {
+    display: block;
+    font-size: 11px;
+    font-weight: 600;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--muted);
+    margin-bottom: 8px;
+  }
+
+  input[type="text"], select {
+    width: 100%;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 10px;
+    padding: 12px 16px;
+    color: var(--text);
+    font-family: 'DM Mono', monospace;
+    font-size: 13px;
+    outline: none;
+    transition: border-color 0.2s;
+  }
+
+  input[type="text"]:focus, select:focus {
+    border-color: var(--teal);
+  }
+
+  select option { background: var(--surface); }
+
+  /* Drop zone */
+  .dropzone {
+    border: 2px dashed var(--border);
+    border-radius: 14px;
+    padding: 40px 20px;
+    text-align: center;
+    cursor: pointer;
+    transition: all 0.2s;
+    position: relative;
+    margin-bottom: 20px;
+  }
+
+  .dropzone:hover, .dropzone.drag {
+    border-color: var(--teal);
+    background: var(--teal-dim);
+  }
+
+  .dropzone input {
+    position: absolute;
+    inset: 0;
+    opacity: 0;
+    cursor: pointer;
+    width: 100%;
+    height: 100%;
+  }
+
+  .drop-icon {
+    font-size: 36px;
+    margin-bottom: 12px;
+    display: block;
+  }
+
+  .drop-title {
+    font-size: 16px;
+    font-weight: 700;
+    margin-bottom: 6px;
+  }
+
+  .drop-sub {
+    font-size: 12px;
+    color: var(--muted);
+  }
+
+  .file-name {
+    margin-top: 12px;
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    color: var(--teal);
+    display: none;
+  }
+
+  /* Button */
+  button {
+    width: 100%;
+    padding: 16px;
+    background: var(--teal);
+    color: #0a0e12;
+    border: none;
+    border-radius: 12px;
+    font-family: 'Syne', sans-serif;
+    font-size: 15px;
+    font-weight: 700;
+    cursor: pointer;
+    transition: all 0.2s;
+    letter-spacing: 0.3px;
+  }
+
+  button:hover { opacity: 0.9; transform: translateY(-1px); }
+  button:active { transform: translateY(0); }
+  button:disabled { opacity: 0.4; cursor: not-allowed; transform: none; }
+
+  /* Status */
+  .status {
+    margin-top: 20px;
+    padding: 14px 18px;
+    border-radius: 10px;
+    font-size: 13px;
+    font-weight: 600;
+    display: none;
+    align-items: center;
+    gap: 10px;
+  }
+
+  .status.loading {
+    display: flex;
+    background: rgba(0,212,184,0.08);
+    border: 1px solid rgba(0,212,184,0.2);
+    color: var(--teal);
+  }
+
+  .status.error {
+    display: flex;
+    background: rgba(255,77,109,0.08);
+    border: 1px solid rgba(255,77,109,0.2);
+    color: var(--error);
+  }
+
+  .spinner {
+    width: 16px; height: 16px;
+    border: 2px solid rgba(0,212,184,0.3);
+    border-top-color: var(--teal);
+    border-radius: 50%;
+    animation: spin 0.8s linear infinite;
+    flex-shrink: 0;
+  }
+
+  /* Result */
+  .result-card {
+    width: 100%;
+    max-width: 620px;
+    margin-top: 20px;
+    background: var(--surface);
+    border: 1px solid var(--border);
+    border-radius: 20px;
+    overflow: hidden;
+    display: none;
+    animation: fadeUp 0.4s ease both;
+  }
+
+  .result-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 16px 24px;
+    border-bottom: 1px solid var(--border);
+  }
+
+  .result-title {
+    font-size: 13px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 1px;
+    color: var(--teal);
+    display: flex;
+    align-items: center;
+    gap: 8px;
+  }
+
+  .copy-btn {
+    width: auto;
+    padding: 7px 16px;
+    font-size: 12px;
+    background: var(--teal-dim);
+    color: var(--teal);
+    border: 1px solid rgba(0,212,184,0.3);
+    border-radius: 8px;
+  }
+
+  .copy-btn:hover { background: var(--teal-glow); transform: none; }
+
+  .result-body {
+    padding: 24px;
+    overflow-x: auto;
+  }
+
+  pre {
+    font-family: 'DM Mono', monospace;
+    font-size: 12px;
+    line-height: 1.7;
+    color: #a8c0cc;
+    white-space: pre-wrap;
+    word-break: break-all;
+  }
+
+  /* Confidence badge */
+  .confidence {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--teal-dim);
+    border: 1px solid rgba(0,212,184,0.2);
+    border-radius: 20px;
+    padding: 4px 12px;
+    font-size: 12px;
+    font-weight: 600;
+    color: var(--teal);
+    margin-top: 16px;
+  }
+
+  /* Supported formats */
+  .formats {
+    display: flex;
+    gap: 8px;
+    flex-wrap: wrap;
+    margin-top: 8px;
+  }
+
+  .tag {
+    font-size: 11px;
+    font-weight: 600;
+    padding: 3px 10px;
+    background: var(--border);
+    border-radius: 6px;
+    color: var(--muted);
+    font-family: 'DM Mono', monospace;
+  }
+
+  @keyframes spin { to { transform: rotate(360deg); } }
+  @keyframes fadeDown { from { opacity:0; transform:translateY(-20px); } to { opacity:1; transform:translateY(0); } }
+  @keyframes fadeUp { from { opacity:0; transform:translateY(20px); } to { opacity:1; transform:translateY(0); } }
+</style>
+</head>
+<body>
+
+<header>
+  <div class="logo">
+    <div class="logo-icon">📄</div>
+    <div class="logo-text">Docu<span>Extract</span></div>
+  </div>
+  <h1>Upload any doc.<br><em>Get clean JSON.</em></h1>
+  <p class="subtitle">Invoice • Receipt • ID Card → Structured data in seconds</p>
+</header>
+
+<div class="card">
+
+  <div class="field">
+    <label>API Key</label>
+    <input type="text" id="apiKey" placeholder="Enter your API key" value="test-api-key-123" />
+  </div>
+
+  <div class="field">
+    <label>Document Type</label>
+    <select id="docType">
+      <option value="auto">🔍 Auto Detect</option>
+      <option value="invoice">🧾 Invoice</option>
+      <option value="receipt">🛒 Receipt</option>
+      <option value="id_card">🪪 ID Card</option>
+    </select>
+  </div>
+
+  <div class="dropzone" id="dropzone">
+    <input type="file" id="fileInput" accept=".jpg,.jpeg,.png,.webp,.tiff,.pdf" />
+    <span class="drop-icon">📂</span>
+    <div class="drop-title">Drop your file here</div>
+    <div class="drop-sub">or click to browse</div>
+    <div class="formats">
+      <span class="tag">JPG</span>
+      <span class="tag">PNG</span>
+      <span class="tag">PDF</span>
+      <span class="tag">WEBP</span>
+      <span class="tag">TIFF</span>
+    </div>
+    <div class="file-name" id="fileName"></div>
+  </div>
+
+  <button id="extractBtn" onclick="extractDoc()" disabled>
+    Extract JSON →
+  </button>
+
+  <div class="status loading" id="statusLoading">
+    <div class="spinner"></div>
+    <span id="statusText">Processing document...</span>
+  </div>
+
+  <div class="status error" id="statusError">
+    <span>⚠️</span>
+    <span id="errorText">Something went wrong.</span>
+  </div>
+
+</div>
+
+<div class="result-card" id="resultCard">
+  <div class="result-header">
+    <div class="result-title">
+      ✅ Extracted Data
+      <span id="docTypeBadge" style="font-weight:400; text-transform:none; letter-spacing:0; color: var(--muted);"></span>
+    </div>
+    <button class="copy-btn" onclick="copyJSON()">Copy JSON</button>
+  </div>
+  <div class="result-body">
+    <pre id="resultJson"></pre>
+    <div class="confidence" id="confidenceBadge"></div>
+  </div>
+</div>
+
+<script>
+  const API_BASE = "https://docuextrat.onrender.com";
+
+  const fileInput = document.getElementById('fileInput');
+  const dropzone = document.getElementById('dropzone');
+  const fileName = document.getElementById('fileName');
+  const extractBtn = document.getElementById('extractBtn');
+
+  fileInput.addEventListener('change', () => {
+    if (fileInput.files[0]) {
+      fileName.textContent = '📎 ' + fileInput.files[0].name;
+      fileName.style.display = 'block';
+      extractBtn.disabled = false;
+    }
+  });
+
+  dropzone.addEventListener('dragover', e => { e.preventDefault(); dropzone.classList.add('drag'); });
+  dropzone.addEventListener('dragleave', () => dropzone.classList.remove('drag'));
+  dropzone.addEventListener('drop', e => {
+    e.preventDefault();
+    dropzone.classList.remove('drag');
+    fileInput.files = e.dataTransfer.files;
+    fileInput.dispatchEvent(new Event('change'));
+  });
+
+  async function extractDoc() {
+    const apiKey = document.getElementById('apiKey').value.trim();
+    const docType = document.getElementById('docType').value;
+    const file = fileInput.files[0];
+
+    if (!apiKey || !file) return;
+
+    showLoading('Uploading document...');
+    hideResult();
+    extractBtn.disabled = true;
+
+    try {
+      // Step 1: Upload
+      const formData = new FormData();
+      formData.append('file', file);
+      formData.append('doc_type', docType);
+
+      const uploadRes = await fetch(`${API_BASE}/v1/extract`, {
+        method: 'POST',
+        headers: { 'X-API-Key': apiKey },
+        body: formData
+      });
+
+      if (!uploadRes.ok) {
+        const err = await uploadRes.json();
+        throw new Error(err.detail || 'Upload failed');
+      }
+
+      const { job_id } = await uploadRes.json();
+
+      // Step 2: Poll for result
+      showLoading('AI is extracting data...');
+      const result = await pollResult(job_id, apiKey);
+      showResult(result);
+
+    } catch (err) {
+      showError(err.message);
+    } finally {
+      extractBtn.disabled = false;
+    }
+  }
+
+  async function pollResult(jobId, apiKey, attempts = 0) {
+    if (attempts > 20) throw new Error('Timeout — please try again');
+
+    await sleep(2000);
+
+    const res = await fetch(`${API_BASE}/v1/results/${jobId}`, {
+      headers: { 'X-API-Key': apiKey }
+    });
+
+    if (!res.ok) throw new Error('Failed to fetch result');
+
+    const data = await res.json();
+
+    if (data.status === 'completed') return data;
+    if (data.status === 'failed') throw new Error(data.error_message || 'Extraction failed');
+
+    showLoading(`Processing... (${attempts + 1})`);
+    return pollResult(jobId, apiKey, attempts + 1);
+  }
+
+  function showResult(data) {
+    hideLoading();
+    const resultCard = document.getElementById('resultCard');
+    const resultJson = document.getElementById('resultJson');
+    const docTypeBadge = document.getElementById('docTypeBadge');
+    const confidenceBadge = document.getElementById('confidenceBadge');
+
+    const result = data.result || {};
+    resultJson.textContent = JSON.stringify(result, null, 2);
+    docTypeBadge.textContent = data.doc_type ? `(${data.doc_type})` : '';
+
+    const score = result.confidence_score;
+    if (score !== undefined) {
+      const pct = Math.round(score * 100);
+      confidenceBadge.textContent = `⚡ Confidence: ${pct}%`;
+      confidenceBadge.style.display = 'inline-flex';
+    } else {
+      confidenceBadge.style.display = 'none';
+    }
+
+    resultCard.style.display = 'block';
+  }
+
+  function copyJSON() {
+    const text = document.getElementById('resultJson').textContent;
+    navigator.clipboard.writeText(text).then(() => {
+      const btn = document.querySelector('.copy-btn');
+      btn.textContent = 'Copied! ✓';
+      setTimeout(() => btn.textContent = 'Copy JSON', 2000);
+    });
+  }
+
+  function showLoading(msg) {
+    document.getElementById('statusLoading').style.display = 'flex';
+    document.getElementById('statusText').textContent = msg;
+    document.getElementById('statusError').style.display = 'none';
+  }
+
+  function hideLoading() {
+    document.getElementById('statusLoading').style.display = 'none';
+  }
+
+  function showError(msg) {
+    hideLoading();
+    document.getElementById('statusError').style.display = 'flex';
+    document.getElementById('errorText').textContent = msg;
+  }
+
+  function hideResult() {
+    document.getElementById('resultCard').style.display = 'none';
+  }
+
+  const sleep = ms => new Promise(r => setTimeout(r, ms));
+</script>
+</body>
+        </html>
+        
